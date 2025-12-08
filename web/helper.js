@@ -44,10 +44,10 @@ export class UnicodeProcessor {
             '—': '-',
             '¯': ' ',
             '_': ' ',
-            '"': '"',
-            '"': '"',
-            '\u2018': "'",  // left single quote
-            '\u2019': "'",  // right single quote
+            '\u201C': '"',  // left double quote "
+            '\u201D': '"',  // right double quote "
+            '\u2018': "'",  // left single quote '
+            '\u2019': "'",  // right single quote '
             '´': "'",
             '`': "'",
             '[': ' ',
