@@ -701,23 +701,27 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
                 dummy_img = PILImage.new('RGBA', (1, 1))
                 dummy_draw = ImageDraw.Draw(dummy_img)
                 bbox = dummy_draw.textbbox((0, 0), line, font=pil_font)
+                # bbox는 (x0, y0, x1, y1) - y0가 음수일 수 있음 (baseline 위로 올라가는 부분)
                 text_width = bbox[2] - bbox[0]
                 text_height = bbox[3] - bbox[1]
+                # bbox 오프셋 저장 (텍스트 그릴 때 보정 필요)
+                bbox_offset_x = bbox[0]
+                bbox_offset_y = bbox[1]
 
                 # 외곽선 두께
                 outline_width = 3
 
-                # 이미지 크기 (자막 텍스트 + 여백)
+                # 이미지 크기 (자막 텍스트 + 여백) - 더 넉넉하게 설정
                 img_width = text_width + outline_width * 2 + 20
-                img_height = text_height + outline_width * 2 + 10
+                img_height = text_height + outline_width * 2 + 20  # 하단 여백 증가
 
                 # RGBA 이미지 생성 (투명 배경)
                 subtitle_img = PILImage.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
                 draw = ImageDraw.Draw(subtitle_img)
 
-                # 텍스트 위치 계산 (이미지 내 중앙)
-                text_x = (img_width - text_width) // 2
-                text_y = (img_height - text_height) // 2
+                # 텍스트 위치 계산 (이미지 내 중앙, bbox 오프셋 보정)
+                text_x = (img_width - text_width) // 2 - bbox_offset_x
+                text_y = (img_height - text_height) // 2 - bbox_offset_y
 
                 # 외곽선 (검정)
                 for dx in range(-outline_width, outline_width + 1):
