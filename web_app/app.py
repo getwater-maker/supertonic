@@ -807,14 +807,19 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
 
         # GPU 인코딩 시도 (NVENC), 실패시 CPU 폴백
         def get_video_codec():
-            """GPU NVENC 실제 사용 가능 여부 확인 (테스트 인코딩)"""
+            """GPU NVENC 실제 사용 가능 여부 확인 (MoviePy의 ffmpeg 사용)"""
             import subprocess
             import tempfile
             try:
+                # MoviePy가 사용하는 ffmpeg 경로 가져오기
+                from moviepy.config import get_setting
+                ffmpeg_path = get_setting("FFMPEG_BINARY")
+                print(f"MoviePy ffmpeg 경로: {ffmpeg_path}")
+
                 # 실제 NVENC 테스트 (1프레임 인코딩 시도)
                 with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as tmp:
                     result = subprocess.run(
-                        ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.1',
+                        [ffmpeg_path, '-y', '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.1',
                          '-c:v', 'h264_nvenc', '-frames:v', '1', tmp.name],
                         capture_output=True, text=True, timeout=10
                     )
@@ -1009,22 +1014,29 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
 
         # GPU 인코딩 시도 (NVENC), 실패시 CPU 폴백
         def get_video_codec():
-            """GPU NVENC 실제 사용 가능 여부 확인 (테스트 인코딩)"""
+            """GPU NVENC 실제 사용 가능 여부 확인 (MoviePy의 ffmpeg 사용)"""
             import subprocess
             import tempfile
             try:
+                # MoviePy가 사용하는 ffmpeg 경로 가져오기
+                from moviepy.config import get_setting
+                ffmpeg_path = get_setting("FFMPEG_BINARY")
+                print(f"MoviePy ffmpeg 경로: {ffmpeg_path}")
+
                 # 실제 NVENC 테스트 (1프레임 인코딩 시도)
                 with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as tmp:
                     result = subprocess.run(
-                        ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.1',
+                        [ffmpeg_path, '-y', '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.1',
                          '-c:v', 'h264_nvenc', '-frames:v', '1', tmp.name],
                         capture_output=True, text=True, timeout=10
                     )
                     if result.returncode == 0:
                         print("GPU 인코딩 (NVENC) 사용 가능 확인됨")
                         return 'h264_nvenc'
+                    else:
+                        print(f"NVENC 테스트 실패: {result.stderr}")
             except Exception as e:
-                print(f"NVENC 테스트 실패: {e}")
+                print(f"NVENC 테스트 예외: {e}")
             print("CPU 인코딩 (libx264) 사용")
             return 'libx264'
 
