@@ -448,6 +448,11 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
         """#RRGGBB 형식을 (R, G, B) 튜플로 변환"""
         if not hex_color:
             return (0, 0, 0)
+        # Gradio ColorPicker는 dict {'hex': '#rrggbb'} 또는 문자열 반환 가능
+        if isinstance(hex_color, dict):
+            hex_color = hex_color.get('hex', '#000000')
+        if not isinstance(hex_color, str):
+            return (0, 0, 0)
         hex_color = hex_color.lstrip('#')
         if len(hex_color) == 3:
             hex_color = ''.join([c*2 for c in hex_color])
@@ -459,7 +464,7 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
         except (ValueError, IndexError):
             return (0, 0, 0)
 
-    shape_rgb = hex_to_rgb(shape_color) if shape_color else (0, 0, 0)
+    shape_rgb = hex_to_rgb(shape_color)
     print(f"도형 색상 파싱: {shape_color} -> RGB{shape_rgb}")
 
     # X/Y 오프셋 처리 (% 단위, -50 ~ 50 범위)
@@ -800,14 +805,50 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
             filename = f"video_{timestamp}.mp4"
         filepath = os.path.join(OUTPUT_DIR, filename)
 
-        final_clip.write_videofile(
-            filepath,
-            fps=30,
-            codec='libx264',
-            audio_codec='aac',
-            verbose=False,
-            logger=None
-        )
+        # GPU 인코딩 시도 (NVENC), 실패시 CPU 폴백
+        def get_video_codec():
+            """GPU NVENC 실제 사용 가능 여부 확인 (테스트 인코딩)"""
+            import subprocess
+            import tempfile
+            try:
+                # 실제 NVENC 테스트 (1프레임 인코딩 시도)
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as tmp:
+                    result = subprocess.run(
+                        ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=black:s=64x64:d=0.1',
+                         '-c:v', 'h264_nvenc', '-frames:v', '1', tmp.name],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0:
+                        print("GPU 인코딩 (NVENC) 사용 가능 확인됨")
+                        return 'h264_nvenc'
+            except Exception as e:
+                print(f"NVENC 테스트 실패: {e}")
+            print("CPU 인코딩 (libx264) 사용")
+            return 'libx264'
+
+        video_codec = get_video_codec()
+
+        try:
+            final_clip.write_videofile(
+                filepath,
+                fps=30,
+                codec=video_codec,
+                audio_codec='aac',
+                verbose=False,
+                logger=None
+            )
+        except Exception as enc_err:
+            # NVENC 실패 시 CPU 폴백
+            if video_codec == 'h264_nvenc':
+                print(f"NVENC 인코딩 실패, CPU 폴백: {enc_err}")
+                final_clip.write_videofile(
+                    filepath,
+                    fps=30,
+                    codec='libx264',
+                    audio_codec='aac',
+                    verbose=False,
+                    logger=None
+                )
 
         # 리소스 정리
         final_clip.close()
@@ -850,8 +891,8 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
         if total_seconds <= 0:
             return None, "1초 이상의 시간을 입력해주세요."
 
-        if total_seconds > 3600 * 3:  # 최대 3시간
-            return None, "최대 3시간까지만 생성 가능합니다."
+        if total_seconds > 3600 * 48:  # 최대 48시간
+            return None, "최대 48시간까지만 생성 가능합니다."
 
         # 해상도 파싱
         resolution = resolution if resolution else "1920x1080"
@@ -861,15 +902,23 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
         def hex_to_rgb(hex_color):
             if not hex_color:
                 return (0, 0, 0)
+            # Gradio ColorPicker는 dict {'hex': '#rrggbb'} 또는 문자열 반환 가능
+            if isinstance(hex_color, dict):
+                hex_color = hex_color.get('hex', '#000000')
+            if not isinstance(hex_color, str):
+                return (0, 0, 0)
             hex_color = hex_color.lstrip('#')
             if len(hex_color) == 3:
                 hex_color = ''.join([c*2 for c in hex_color])
             try:
-                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                return (r, g, b)
             except (ValueError, IndexError):
                 return (0, 0, 0)
 
-        bg_rgb = hex_to_rgb(bg_color) if bg_color else (0, 0, 0)
+        bg_rgb = hex_to_rgb(bg_color)
         clock_rgb = hex_to_rgb(clock_color) if clock_color else (255, 255, 255)
 
         progress(0.10, desc="배경 클립 생성 중...")
@@ -956,14 +1005,50 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
         filename = f"solid_{timestamp}.mp4"
         filepath = os.path.join(OUTPUT_DIR, filename)
 
-        final_clip.write_videofile(
-            filepath,
-            fps=1 if show_clock else 1,  # 시계는 1fps로 충분
-            codec='libx264',
-            audio=False,
-            verbose=False,
-            logger=None
-        )
+        # GPU 인코딩 시도 (NVENC), 실패시 CPU 폴백
+        def get_video_codec():
+            """GPU NVENC 실제 사용 가능 여부 확인 (테스트 인코딩)"""
+            import subprocess
+            import tempfile
+            try:
+                # 실제 NVENC 테스트 (1프레임 인코딩 시도)
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as tmp:
+                    result = subprocess.run(
+                        ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=black:s=64x64:d=0.1',
+                         '-c:v', 'h264_nvenc', '-frames:v', '1', tmp.name],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0:
+                        print("GPU 인코딩 (NVENC) 사용 가능 확인됨")
+                        return 'h264_nvenc'
+            except Exception as e:
+                print(f"NVENC 테스트 실패: {e}")
+            print("CPU 인코딩 (libx264) 사용")
+            return 'libx264'
+
+        video_codec = get_video_codec()
+
+        try:
+            final_clip.write_videofile(
+                filepath,
+                fps=1 if show_clock else 1,  # 시계는 1fps로 충분
+                codec=video_codec,
+                audio=False,
+                verbose=False,
+                logger=None
+            )
+        except Exception as enc_err:
+            # NVENC 실패 시 CPU 폴백
+            if video_codec == 'h264_nvenc':
+                print(f"NVENC 인코딩 실패, CPU 폴백: {enc_err}")
+                final_clip.write_videofile(
+                    filepath,
+                    fps=1 if show_clock else 1,
+                    codec='libx264',
+                    audio=False,
+                    verbose=False,
+                    logger=None
+                )
 
         final_clip.close()
 
@@ -994,8 +1079,8 @@ def load_subtitle_text(file):
 
 def generate_preview(subtitle_text, background_file, resolution, font_size, subtitle_position,
                      subtitle_offset_x, subtitle_offset_y,
-                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity):
-    """자막이 포함된 미리보기 이미지 생성"""
+                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity):
+    """자막이 포함된 미리보기 이미지 생성 (도형색상은 검정색 고정)"""
     try:
         from PIL import Image, ImageDraw, ImageFont
 
@@ -1032,23 +1117,8 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
         except (ValueError, TypeError):
             shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity = 0, 0, 100, 100, 0.5
 
-        # 도형 색상 처리 (hex to RGB)
-        def hex_to_rgb(hex_color):
-            if not hex_color:
-                return (0, 0, 0)
-            hex_color = hex_color.lstrip('#')
-            if len(hex_color) == 3:
-                hex_color = ''.join([c*2 for c in hex_color])
-            try:
-                r = int(hex_color[0:2], 16)
-                g = int(hex_color[2:4], 16)
-                b = int(hex_color[4:6], 16)
-                return (r, g, b)
-            except (ValueError, IndexError):
-                return (0, 0, 0)
-
-        shape_rgb = hex_to_rgb(shape_color) if shape_color else (0, 0, 0)
-        print(f"미리보기 도형 색상: {shape_color} -> RGB{shape_rgb}")
+        # 도형 색상은 검정색 고정
+        shape_rgb = (0, 0, 0)
 
         resolution = resolution if resolution else "1920x1080"
 
@@ -1129,32 +1199,47 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
 
         draw = ImageDraw.Draw(bg_img)
 
-        # 텍스트 크기 계산
+        # 텍스트 크기 계산 (영상 생성과 동일한 로직)
         bbox = draw.textbbox((0, 0), first_line, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
 
-        # 자막 위치 계산
+        # 외곽선 두께
+        outline_width = 3
+
+        # 이미지 크기 (영상 생성과 동일하게 여백 추가)
+        img_width = text_width + outline_width * 2 + 20
+        img_height = text_height + outline_width * 2 + 20
+
+        # 자막 위치 계산 (영상 생성과 동일한 로직 사용)
         margin = 50
         # 오프셋 픽셀 계산 (해상도의 %)
         offset_x_px = int(video_width * subtitle_offset_x / 100)
         offset_y_px = int(video_height * subtitle_offset_y / 100)
 
-        positions = {
-            '상단-왼쪽': (margin, margin),
-            '상단-중앙': ((video_width - text_width) // 2, margin),
-            '상단-오른쪽': (video_width - text_width - margin, margin),
-            '중앙-왼쪽': (margin, (video_height - text_height) // 2),
-            '중앙': ((video_width - text_width) // 2, (video_height - text_height) // 2),
-            '중앙-오른쪽': (video_width - text_width - margin, (video_height - text_height) // 2),
-            '하단-왼쪽': (margin, video_height - text_height - margin),
-            '하단-중앙': ((video_width - text_width) // 2, video_height - text_height - margin),
-            '하단-오른쪽': (video_width - text_width - margin, video_height - text_height - margin),
-        }
-        base_x, base_y = positions.get(subtitle_position, positions['하단-중앙'])
+        # 자막 클립 위치 계산 (영상 생성과 동일)
+        if subtitle_position == '중앙':
+            clip_x = (video_width - img_width) // 2
+            clip_y = (video_height - img_height) // 2
+        elif subtitle_position == '하단-중앙':
+            clip_x = (video_width - img_width) // 2
+            clip_y = video_height - img_height - margin
+        elif subtitle_position == '상단-중앙':
+            clip_x = (video_width - img_width) // 2
+            clip_y = margin
+        else:
+            clip_x = (video_width - img_width) // 2
+            clip_y = video_height - img_height - margin
+
         # 오프셋 적용
-        text_x = base_x + offset_x_px
-        text_y = base_y + offset_y_px
+        clip_x += offset_x_px
+        clip_y += offset_y_px
+
+        # 텍스트 위치 (클립 내에서 중앙)
+        bbox_offset_x = bbox[0]
+        bbox_offset_y = bbox[1]
+        text_x = clip_x + (img_width - text_width) // 2 - bbox_offset_x
+        text_y = clip_y + (img_height - text_height) // 2 - bbox_offset_y
 
         # 도형 그리기 (사용자 지정 사각형)
         if use_shape and shape_x1 != shape_x2 and shape_y1 != shape_y2:
@@ -1174,8 +1259,7 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
         # 텍스트 그리기 (검정 외곽선 + 흰색 본문)
         draw = ImageDraw.Draw(bg_img)
 
-        # 외곽선 (검정, 두께 3)
-        outline_width = 3
+        # 외곽선 (검정)
         for dx in range(-outline_width, outline_width + 1):
             for dy in range(-outline_width, outline_width + 1):
                 if dx != 0 or dy != 0:
@@ -1214,65 +1298,102 @@ def create_ui():
         with gr.Tabs():
             # === 탭 1: TTS + 영상 생성 ===
             with gr.TabItem("TTS + 영상"):
-                # 1행: 파일 업로드 (대본, 자막, 배경)
+                # 1단: 2.5:2.5:5 비율
                 with gr.Row():
-                    tts_file = gr.File(
-                        label="대본 파일 (TXT/DOCX)",
-                        file_types=[".txt", ".docx"]
-                    )
-                    subtitle_file = gr.File(
-                        label="자막 파일 (TXT/DOCX)",
-                        file_types=[".txt", ".docx"]
-                    )
-                    background_file = gr.File(
-                        label="배경 (이미지/영상)",
-                        file_types=["image", "video"]
-                    )
+                    # 대본 영역 (scale=2.5)
+                    with gr.Column(scale=5):  # 2.5 * 2 = 5
+                        tts_file = gr.File(
+                            label="대본 파일 (TXT/DOCX)",
+                            file_types=[".txt", ".docx"]
+                        )
+                        tts_text = gr.Textbox(
+                            label="대본 (음성 변환용)",
+                            placeholder="음성으로 변환할 텍스트를 입력하거나 파일을 첨부하세요...",
+                            lines=8
+                        )
+                        # 음성 설정 (언어, 음성, 품질, 속도 순서)
+                        with gr.Row():
+                            lang_select = gr.Dropdown(choices=languages, value="한국어", label="언어")
+                            voice_select = gr.Dropdown(choices=voices, value=voices[0] if voices else None, label="음성")
+                            step_slider = gr.Number(value=5, label="품질", minimum=1, maximum=10, step=1)
+                            speed_slider = gr.Number(value=1.0, label="속도", minimum=0.5, maximum=2.0, step=0.1)
 
-                # 2행: 텍스트 입력 + 미리보기
+                    # 자막 영역 (scale=2.5)
+                    with gr.Column(scale=5):  # 2.5 * 2 = 5
+                        subtitle_file = gr.File(
+                            label="자막 파일 (TXT/DOCX)",
+                            file_types=[".txt", ".docx"]
+                        )
+                        subtitle_text = gr.Textbox(
+                            label="자막 (비워두면 대본 사용)",
+                            placeholder="화면에 표시될 자막...",
+                            lines=8
+                        )
+
+                    # 배경 + 미리보기 + 영상설정 영역 (scale=5)
+                    with gr.Column(scale=10):  # 5 * 2 = 10
+                        background_file = gr.File(
+                            label="배경 (이미지/영상)",
+                            file_types=["image", "video"]
+                        )
+                        preview_image = gr.Image(label="미리보기", height=280)
+
+                        # 영상 설정 (미리보기 아래)
+                        # 줄1: 해상도, 폰트크기, 자막위치, X오프셋(%), Y오프셋(%) - 모두 같은 라인
+                        with gr.Row(visible=False) as video_settings_row1:
+                            resolution_select = gr.Dropdown(choices=resolutions, value="1920x1080", label="해상도", scale=2, min_width=100)
+                            font_size_slider = gr.Number(value=70, label="폰트크기", step=5, scale=1, min_width=60)
+                            position_select = gr.Dropdown(choices=subtitle_positions, value="중앙", label="자막위치", scale=1, min_width=80)
+                            subtitle_offset_x = gr.Number(value=0, label="X오프셋(%)", step=1, scale=1, min_width=60)
+                            subtitle_offset_y = gr.Number(value=0, label="Y오프셋(%)", step=1, scale=1, min_width=60)
+
+                        # 줄2: 도형삽입, X1(%), Y1(%), X2(%), Y2(%), 도형투명도, 생성하기 버튼
+                        # 도형색상 제거 (검정색 고정)
+                        with gr.Row(visible=False) as video_settings_row2:
+                            use_shape = gr.Checkbox(label="도형\n삽입", value=True, scale=1, min_width=70)
+                            shape_x1 = gr.Number(value=-5, label="X1(%)", step=1, scale=1, min_width=50)
+                            shape_y1 = gr.Number(value=45, label="Y1(%)", step=1, scale=1, min_width=50)
+                            shape_x2 = gr.Number(value=105, label="X2(%)", step=1, scale=1, min_width=50)
+                            shape_y2 = gr.Number(value=55, label="Y2(%)", step=1, scale=1, min_width=50)
+                            shape_opacity = gr.Number(value=0.5, label="투명도", step=0.1, scale=1, min_width=50)
+                            generate_btn = gr.Button("생성하기", variant="primary", scale=1)
+
+                        # 음성만 생성 버튼 (배경 없을 때)
+                        with gr.Row(visible=True) as audio_only_btn_row:
+                            generate_audio_btn = gr.Button("음성 생성하기", variant="primary", scale=1)
+
+                # 2단: 5:5 비율 (결과 영역)
                 with gr.Row():
-                    tts_text = gr.Textbox(
-                        label="대본 (음성 변환용)",
-                        placeholder="음성으로 변환할 텍스트를 입력하거나 파일을 첨부하세요...",
-                        lines=10
-                    )
-                    subtitle_text = gr.Textbox(
-                        label="자막 (비워두면 대본 사용)",
-                        placeholder="화면에 표시될 자막...",
-                        lines=10
-                    )
-                    preview_image = gr.Image(label="미리보기", height=280)
+                    # 1열: 상태 + 결과음성
+                    with gr.Column(scale=5):
+                        status_output = gr.Textbox(label="상태", interactive=False)
+                        audio_output = gr.Audio(label="결과 음성", type="filepath")
 
-        # 3행: 음성 설정 + 영상 설정 + 상태 + 생성버튼 (한 줄)
-        with gr.Row():
-            voice_select = gr.Dropdown(choices=voices, value=voices[0] if voices else None, label="음성", scale=2)
-            speed_slider = gr.Number(value=1.0, label="속도", minimum=0.5, maximum=2.0, step=0.1, scale=1)
-            lang_select = gr.Dropdown(choices=languages, value="한국어", label="언어", scale=1)
-            step_slider = gr.Number(value=5, label="품질", minimum=1, maximum=10, step=1, scale=1)
-            # 영상 설정 (배경 첨부 시만 사용됨)
-            resolution_select = gr.Dropdown(choices=resolutions, value="1920x1080", label="해상도", visible=False, scale=2)
-            font_size_slider = gr.Number(value=70, label="폰트", step=5, visible=False, scale=1)
-            position_select = gr.Dropdown(choices=subtitle_positions, value="중앙", label="자막위치", visible=False, scale=2)
-            subtitle_offset_x = gr.Number(value=0, label="X오프셋(%)", step=1, visible=False, scale=1)
-            subtitle_offset_y = gr.Number(value=0, label="Y오프셋(%)", step=1, visible=False, scale=1)
-            use_shape = gr.Checkbox(label="도형삽입", value=True, visible=False, scale=1, min_width=80)
-            shape_x1 = gr.Number(value=-5, label="X1(%)", step=1, visible=False, scale=1)
-            shape_y1 = gr.Number(value=45, label="Y1(%)", step=1, visible=False, scale=1)
-            shape_x2 = gr.Number(value=105, label="X2(%)", step=1, visible=False, scale=1)
-            shape_y2 = gr.Number(value=57, label="Y2(%)", step=1, visible=False, scale=1)
-            shape_color = gr.ColorPicker(value="#000000", label="도형색상", visible=False, scale=1)
-            shape_opacity = gr.Number(value=0.5, label="도형투명도", step=0.1, visible=False, scale=1)
-            status_output = gr.Textbox(label="상태", interactive=False, scale=2)
-            generate_btn = gr.Button("생성하기", variant="primary", scale=1)
+                    # 2열: 결과영상 + 다운로드
+                    with gr.Column(scale=5):
+                        video_output = gr.Video(label="결과 영상", visible=False)
+                        download_file = gr.File(label="📥 다운로드", visible=False)
 
-        # 4행: 결과
-        with gr.Row():
-            audio_output = gr.Audio(label="결과 음성", type="filepath")
-            video_output = gr.Video(label="결과 영상", visible=False)
+            # === 탭 2: 단색 배경 영상 (검정화면) ===
+            with gr.TabItem("단색 배경 영상"):
+                gr.Markdown("### 단색 배경 영상 생성\n지정한 시간 동안 단색 배경만 나오는 영상을 생성합니다.")
 
-        # 다운로드 파일 (Kaggle용)
-        with gr.Row():
-            download_file = gr.File(label="📥 다운로드", visible=False)
+                with gr.Row():
+                    solid_hours = gr.Number(value=0, label="시간", minimum=0, maximum=48, step=1, scale=1)
+                    solid_minutes = gr.Number(value=1, label="분", minimum=0, maximum=59, step=1, scale=1)
+                    solid_seconds = gr.Number(value=0, label="초", minimum=0, maximum=59, step=1, scale=1)
+                    solid_resolution = gr.Dropdown(choices=resolutions, value="1920x1080", label="해상도", scale=2)
+
+                with gr.Row():
+                    solid_bg_color = gr.ColorPicker(value="#000000", label="배경 색상", scale=1)
+                    solid_show_clock = gr.Checkbox(label="디지털 시계 표시", value=False, scale=1)
+                    solid_clock_color = gr.ColorPicker(value="#FFFFFF", label="시계 색상", scale=1)
+                    solid_status = gr.Textbox(label="상태", interactive=False, scale=2)
+                    solid_generate_btn = gr.Button("생성하기", variant="primary", scale=1)
+
+                with gr.Row():
+                    solid_video_output = gr.Video(label="결과 영상")
+                    solid_download = gr.File(label="다운로드")
 
         # 이벤트 연결
         def get_lang_code(lang_name):
@@ -1282,22 +1403,27 @@ def create_ui():
         # 배경 파일 첨부 시 영상 설정 표시/숨김
         def toggle_video_settings(file):
             visible = file is not None
-            return [gr.update(visible=visible)] * 13  # 12개 영상설정 + 1개 영상출력
+            # 영상설정 2줄 + 영상출력 = 3개 visible
+            # 음성전용 버튼은 반대로
+            return [
+                gr.update(visible=visible),  # video_settings_row1
+                gr.update(visible=visible),  # video_settings_row2
+                gr.update(visible=visible),  # video_output
+                gr.update(visible=not visible),  # audio_only_btn_row (배경 없을 때만 표시)
+            ]
 
         background_file.change(
             fn=toggle_video_settings,
             inputs=[background_file],
-            outputs=[resolution_select, font_size_slider, position_select,
-                     subtitle_offset_x, subtitle_offset_y,
-                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity, video_output]
+            outputs=[video_settings_row1, video_settings_row2, video_output, audio_only_btn_row]
         )
 
-        # 미리보기 입력 컴포넌트 리스트
+        # 미리보기 입력 컴포넌트 리스트 (shape_color 제거 - 검정색 고정)
         preview_inputs = [
             subtitle_text, background_file, resolution_select,
             font_size_slider, position_select,
             subtitle_offset_x, subtitle_offset_y,
-            use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity
+            use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity
         ]
 
         # 실시간 미리보기: 설정 변경 시 자동 업데이트
@@ -1308,7 +1434,7 @@ def create_ui():
                 outputs=[preview_image]
             )
 
-        for num_input in [font_size_slider, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity, subtitle_offset_x, subtitle_offset_y]:
+        for num_input in [font_size_slider, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity, subtitle_offset_x, subtitle_offset_y]:
             num_input.change(
                 fn=generate_preview,
                 inputs=preview_inputs,
@@ -1343,7 +1469,7 @@ def create_ui():
         # 생성 버튼 클릭
         def generate_content(tts_txt, sub_txt, voice, lang, speed, step,
                              bg_file, res, font, pos, offset_x, offset_y,
-                             use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_color, shp_opacity, script_file):
+                             use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_opacity, script_file):
             lang_code = get_lang_code(lang)
 
             # 출력 파일명 결정 (대본 파일명 기반)
@@ -1353,11 +1479,11 @@ def create_ui():
                 base_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
             if bg_file is not None:
-                # 영상 생성
+                # 영상 생성 (도형색상은 검정색 고정)
                 video_path, status = create_video(
                     tts_txt, sub_txt, voice, lang_code, speed, step,
                     bg_file.name, res, font, pos, offset_x, offset_y,
-                    use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_color, shp_opacity,
+                    use_shp, shp_x1, shp_y1, shp_x2, shp_y2, "#000000", shp_opacity,
                     output_name=base_name
                 )
                 # 다운로드 파일도 함께 반환
@@ -1377,48 +1503,39 @@ def create_ui():
                 tts_text, subtitle_text, voice_select, lang_select,
                 speed_slider, step_slider, background_file, resolution_select,
                 font_size_slider, position_select, subtitle_offset_x, subtitle_offset_y,
-                use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity, tts_file
+                use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity, tts_file
             ],
             outputs=[audio_output, video_output, status_output, download_file]
         )
 
-        # === 탭 2: 단색 배경 영상 (검정화면) ===
-        with gr.TabItem("단색 배경 영상"):
-            gr.Markdown("### 단색 배경 영상 생성\n지정한 시간 동안 단색 배경만 나오는 영상을 생성합니다.")
+        # 음성 전용 버튼도 동일한 함수 연결
+        generate_audio_btn.click(
+            fn=generate_content,
+            inputs=[
+                tts_text, subtitle_text, voice_select, lang_select,
+                speed_slider, step_slider, background_file, resolution_select,
+                font_size_slider, position_select, subtitle_offset_x, subtitle_offset_y,
+                use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity, tts_file
+            ],
+            outputs=[audio_output, video_output, status_output, download_file]
+        )
 
-            with gr.Row():
-                solid_hours = gr.Number(value=0, label="시간", minimum=0, maximum=3, step=1, scale=1)
-                solid_minutes = gr.Number(value=1, label="분", minimum=0, maximum=59, step=1, scale=1)
-                solid_seconds = gr.Number(value=0, label="초", minimum=0, maximum=59, step=1, scale=1)
-                solid_resolution = gr.Dropdown(choices=resolutions, value="1920x1080", label="해상도", scale=2)
-
-            with gr.Row():
-                solid_bg_color = gr.ColorPicker(value="#000000", label="배경 색상", scale=1)
-                solid_show_clock = gr.Checkbox(label="디지털 시계 표시", value=False, scale=1)
-                solid_clock_color = gr.ColorPicker(value="#FFFFFF", label="시계 색상", scale=1)
-                solid_status = gr.Textbox(label="상태", interactive=False, scale=2)
-                solid_generate_btn = gr.Button("생성하기", variant="primary", scale=1)
-
-            with gr.Row():
-                solid_video_output = gr.Video(label="결과 영상")
-                solid_download = gr.File(label="다운로드")
-
-            # 단색 배경 영상 생성 이벤트
-            def generate_solid_video(hours, minutes, seconds, bg_color, resolution, show_clock, clock_color):
-                video_path, status = create_solid_color_video(
-                    hours, minutes, seconds, bg_color, resolution, show_clock, clock_color
-                )
-                if video_path:
-                    return video_path, status, video_path
-                else:
-                    return None, status, None
-
-            solid_generate_btn.click(
-                fn=generate_solid_video,
-                inputs=[solid_hours, solid_minutes, solid_seconds, solid_bg_color,
-                        solid_resolution, solid_show_clock, solid_clock_color],
-                outputs=[solid_video_output, solid_status, solid_download]
+        # 단색 배경 영상 생성 이벤트
+        def generate_solid_video(hours, minutes, seconds, bg_color, resolution, show_clock, clock_color):
+            video_path, status = create_solid_color_video(
+                hours, minutes, seconds, bg_color, resolution, show_clock, clock_color
             )
+            if video_path:
+                return video_path, status, video_path
+            else:
+                return None, status, None
+
+        solid_generate_btn.click(
+            fn=generate_solid_video,
+            inputs=[solid_hours, solid_minutes, solid_seconds, solid_bg_color,
+                    solid_resolution, solid_show_clock, solid_clock_color],
+            outputs=[solid_video_output, solid_status, solid_download]
+        )
 
     return demo
 
