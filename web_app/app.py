@@ -1548,8 +1548,8 @@ if __name__ == '__main__':
     print(f"출력 폴더: {OUTPUT_DIR}")
     print("=" * 50)
 
-    # TTS 모델 미리 로드 (CPU 모드)
-    init_tts()
+    # TTS 모델 미리 로드 (GPU 모드 - CUDA 사용 가능 시)
+    init_tts(use_gpu=True)
 
     # Gradio 앱 시작
     demo = create_ui()
