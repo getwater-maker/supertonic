@@ -441,7 +441,7 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
     try:
         from moviepy.editor import (  # type: ignore
             ImageClip, VideoFileClip, AudioFileClip,
-            CompositeVideoClip, TextClip, ColorClip
+            CompositeVideoClip, ColorClip
         )
 
         progress(0.05, desc="준비 중...")
@@ -580,9 +580,50 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
 
         txt_position = get_subtitle_pos(subtitle_position, video_width, video_height, font_size, subtitle_offset_x, subtitle_offset_y)
 
-        # 자막 클립 생성
+        # 자막 클립 생성 (PIL 기반 - ImageMagick 폰트 문제 우회)
         progress(0.60, desc="자막 클립 생성 중...")
         subtitle_clips = []
+
+        # PIL 폰트 로드 (한 번만)
+        from PIL import Image as PILImage, ImageDraw, ImageFont
+
+        # 폰트 찾기 - TTF 우선
+        font_candidates = [
+            os.path.join(FONTS_DIR, 'NotoSansKR-Bold.ttf'),
+            '/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf',
+            '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
+            '/usr/share/fonts/truetype/noto/NotoSansKR-Bold.ttf',
+            'C:/Windows/Fonts/NotoSansKR-Bold.ttf',
+            'C:/Windows/Fonts/malgunbd.ttf',
+        ]
+        ttc_candidates = [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
+            '/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc',
+        ]
+
+        pil_font = None
+        for font_path in font_candidates:
+            if os.path.exists(font_path):
+                try:
+                    pil_font = ImageFont.truetype(font_path, font_size)
+                    print(f"PIL 폰트 로드 성공 (TTF): {font_path}")
+                    break
+                except Exception as e:
+                    print(f"TTF 폰트 로드 실패: {font_path} - {e}")
+
+        if pil_font is None:
+            for font_path in ttc_candidates:
+                if os.path.exists(font_path):
+                    try:
+                        pil_font = ImageFont.truetype(font_path, font_size, index=1)
+                        print(f"PIL 폰트 로드 성공 (TTC): {font_path}")
+                        break
+                    except Exception as e:
+                        print(f"TTC 폰트 로드 실패: {font_path} - {e}")
+
+        if pil_font is None:
+            print("모든 폰트 로드 실패, 기본 폰트 사용")
+            pil_font = ImageFont.load_default()
 
         for i, timing in enumerate(subtitle_timings):
             line = timing['text']
@@ -596,100 +637,81 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
                 prog = 0.60 + (i / len(subtitle_timings)) * 0.15
                 progress(prog, desc=f'자막 클립 [{i + 1}/{len(subtitle_timings)}]')
 
-            # 한글 폰트 선택 - ImageMagick용 (시스템 폰트 우선)
-            selected_font = None
-
-            # Linux/Kaggle: 시스템에 설치된 폰트를 우선 사용 (apt-get install fonts-nanum)
-            # ImageMagick은 폰트 이름으로도 접근 가능
-            if platform.system() != 'Windows':
-                # 시스템 폰트 경로 (ImageMagick이 접근 가능한 폰트)
-                system_font_candidates = [
-                    '/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf',
-                    '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
-                    '/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc',
-                    '/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc',
-                ]
-                for font_path in system_font_candidates:
-                    if os.path.exists(font_path):
-                        selected_font = f"@{font_path}"
-                        print(f"시스템 폰트 선택: {font_path}")
-                        break
-
-                # 시스템 폰트 없으면 폰트 이름으로 시도
-                if not selected_font:
-                    # ImageMagick에서 폰트 이름으로 접근 시도
-                    selected_font = "NanumGothic-Bold"
-                    print(f"폰트 이름으로 시도: {selected_font}")
-            else:
-                # Windows: 로컬 폰트 파일 사용
-                font_candidates = [
-                    'C:/Windows/Fonts/NotoSansKR-Bold.ttf',
-                    'C:/Windows/Fonts/malgunbd.ttf',
-                    os.path.join(FONTS_DIR, 'NotoSansKR-Bold.ttf'),
-                ]
-                for font_path in font_candidates:
-                    if os.path.exists(font_path):
-                        selected_font = f"@{font_path}"
-                        print(f"Windows 폰트 선택: {font_path}")
-                        break
-
-            if not selected_font:
-                print("경고: 한글 폰트를 찾을 수 없습니다! ImageMagick 기본 폰트 사용")
-                selected_font = None
-
             try:
-                print(f"TextClip 생성 시도: font={selected_font}, size={font_size}, text={line[:30]}")
+                # PIL로 자막 이미지 생성
+                # 텍스트 크기 측정
+                dummy_img = PILImage.new('RGBA', (1, 1))
+                dummy_draw = ImageDraw.Draw(dummy_img)
+                bbox = dummy_draw.textbbox((0, 0), line, font=pil_font)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
 
-                # font 파라미터 설정 (None이면 생략하여 ImageMagick 기본 사용)
-                txt_kwargs = {
-                    'fontsize': font_size,
-                    'color': 'white',
-                    'stroke_color': 'black',
-                    'stroke_width': 3,
-                    'method': 'caption',
-                    'size': (video_width - 100, None)
-                }
-                if selected_font:
-                    txt_kwargs['font'] = selected_font
+                # 외곽선 두께
+                outline_width = 3
+                padding = int(subtitle_bg_padding) if use_subtitle_bg else 10
 
-                txt_clip = TextClip(line, **txt_kwargs)
-                print(f"TextClip 생성 성공: size={txt_clip.size}")
-
-                # 자막 배경 박스 추가 (화면 전체 너비)
+                # 이미지 크기: 자막 배경 사용 시 화면 전체 너비
                 if use_subtitle_bg:
-                    print(f"자막 배경 생성: use_subtitle_bg={use_subtitle_bg}, opacity={subtitle_bg_opacity}")
-                    txt_w, txt_h = txt_clip.size
-                    # 가로: 화면 전체 + 여유 10px, 세로: 자막 높이 + 패딩*2
-                    bg_w = video_width + 10
-                    bg_h = txt_h + int(subtitle_bg_padding * 2)
+                    img_width = video_width
+                    img_height = text_height + padding * 2 + outline_width * 2
+                else:
+                    img_width = text_width + outline_width * 2 + 20
+                    img_height = text_height + outline_width * 2 + 10
 
-                    # 반투명 검정 배경
-                    bg_color = (0, 0, 0)
+                # RGBA 이미지 생성 (투명 배경)
+                subtitle_img = PILImage.new('RGBA', (img_width, img_height), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(subtitle_img)
 
-                    bg_box = ColorClip(
-                        size=(bg_w, bg_h),
-                        color=bg_color
-                    ).set_opacity(subtitle_bg_opacity)
-                    bg_box = bg_box.set_duration(end_time - start_time)
+                # 자막 배경 박스 (선택적)
+                if use_subtitle_bg:
+                    alpha = int(255 * subtitle_bg_opacity)
+                    draw.rectangle([0, 0, img_width, img_height], fill=(0, 0, 0, alpha))
 
-                    # 배경 박스 위치: 가로는 -5 (왼쪽 여유), 세로는 자막이 정중앙에 오도록
-                    bg_x = -5
+                # 텍스트 위치 계산 (이미지 내 중앙)
+                text_x = (img_width - text_width) // 2
+                text_y = (img_height - text_height) // 2
+
+                # 외곽선 (검정)
+                for dx in range(-outline_width, outline_width + 1):
+                    for dy in range(-outline_width, outline_width + 1):
+                        if dx != 0 or dy != 0:
+                            draw.text((text_x + dx, text_y + dy), line, font=pil_font, fill=(0, 0, 0, 255))
+
+                # 본문 (흰색)
+                draw.text((text_x, text_y), line, font=pil_font, fill=(255, 255, 255, 255))
+
+                # PIL 이미지를 numpy 배열로 변환
+                img_array = np.array(subtitle_img)
+
+                # ImageClip 생성
+                txt_clip = ImageClip(img_array, ismask=False, transparent=True)
+                txt_clip = txt_clip.set_duration(end_time - start_time)
+
+                # 자막 위치 계산
+                if use_subtitle_bg:
+                    # 배경 사용 시: 가로는 0 (전체 너비), 세로는 txt_position 기준
+                    clip_x = 0
+                    if txt_position[1] == 'center':
+                        clip_y = (video_height - img_height) // 2
+                    else:
+                        clip_y = txt_position[1] - padding if isinstance(txt_position[1], int) else video_height - img_height - 50
+                else:
+                    # 배경 미사용 시: txt_position 기준
+                    if txt_position[0] == 'center':
+                        clip_x = (video_width - img_width) // 2
+                    else:
+                        clip_x = txt_position[0] if isinstance(txt_position[0], int) else 50
 
                     if txt_position[1] == 'center':
-                        bg_y = (video_height - bg_h) // 2
+                        clip_y = (video_height - img_height) // 2
                     else:
-                        # 자막의 Y 위치에서 패딩만큼 위로
-                        txt_y = txt_position[1] if isinstance(txt_position[1], int) else 0
-                        bg_y = txt_y - int(subtitle_bg_padding)
+                        clip_y = txt_position[1] if isinstance(txt_position[1], int) else video_height - img_height - 50
 
-                    bg_box = bg_box.set_position((bg_x, bg_y))
-                    bg_box = bg_box.set_start(start_time).set_end(end_time)
-                    subtitle_clips.append(bg_box)
-
-                txt_clip = txt_clip.set_position(txt_position)
+                txt_clip = txt_clip.set_position((clip_x, clip_y))
                 txt_clip = txt_clip.set_start(start_time).set_end(end_time)
                 subtitle_clips.append(txt_clip)
-                print(f"자막 추가: [{start_time:.2f}s - {end_time:.2f}s] {line[:20]}...")
+                print(f"자막 추가 (PIL): [{start_time:.2f}s - {end_time:.2f}s] {line[:20]}...")
+
             except Exception as e:
                 import traceback
                 print(f"자막 클립 생성 실패 [{i}]: {e}")
