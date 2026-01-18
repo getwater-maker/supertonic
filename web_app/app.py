@@ -385,11 +385,11 @@ def synthesize_speech(text, voice_label, language, speed, total_step, progress=g
 def create_video(tts_text, subtitle_text, voice_label, language, speed, total_step,
                  background_file, resolution, font_size, subtitle_position,
                  subtitle_offset_x, subtitle_offset_y,
-                 use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity,
+                 use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity,
                  progress=gr.Progress(), output_name=None):
     """영상 생성"""
     print(f"=== create_video 호출 ===")
-    print(f"use_shape={use_shape}, shape=({shape_x1}%,{shape_y1}%) ~ ({shape_x2}%,{shape_y2}%), opacity={shape_opacity}")
+    print(f"use_shape={use_shape}, shape=({shape_x1}%,{shape_y1}%) ~ ({shape_x2}%,{shape_y2}%), color={shape_color}, opacity={shape_opacity}")
     print(f"subtitle_position={subtitle_position}, offset_x={subtitle_offset_x}%, offset_y={subtitle_offset_y}%")
     print(f"font_size={font_size}")
 
@@ -442,6 +442,21 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
             shape_opacity = 0.5
     except (ValueError, TypeError):
         shape_opacity = 0.5
+
+    # 도형 색상 처리 (hex to RGB)
+    def hex_to_rgb(hex_color):
+        """#RRGGBB 형식을 (R, G, B) 튜플로 변환"""
+        if not hex_color:
+            return (0, 0, 0)
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) == 3:
+            hex_color = ''.join([c*2 for c in hex_color])
+        try:
+            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        except (ValueError, IndexError):
+            return (0, 0, 0)
+
+    shape_rgb = hex_to_rgb(shape_color) if shape_color else (0, 0, 0)
 
     # X/Y 오프셋 처리 (% 단위, -50 ~ 50 범위)
     try:
@@ -578,7 +593,7 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
             if shape_w > 0 and shape_h > 0:
                 shape_clip = ColorClip(
                     size=(shape_w, shape_h),
-                    color=(0, 0, 0)
+                    color=shape_rgb
                 ).set_opacity(shape_opacity)
                 shape_clip = shape_clip.set_duration(audio_duration)
                 shape_clip = shape_clip.set_position((px_x1, px_y1))
@@ -720,16 +735,28 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
                 txt_clip = ImageClip(img_array, ismask=False, transparent=True)
                 txt_clip = txt_clip.set_duration(end_time - start_time)
 
-                # 자막 위치 계산
-                if txt_position[0] == 'center':
+                # 자막 위치 계산 (자막 이미지 크기를 고려하여 중앙 정렬)
+                # txt_position은 기준점 좌표 (center가 아닌 실제 픽셀값)
+                # '중앙' 선택 시: 자막 이미지가 화면 중앙에 오도록 조정
+                if subtitle_position == '중앙':
                     clip_x = (video_width - img_width) // 2
-                else:
-                    clip_x = txt_position[0] if isinstance(txt_position[0], int) else 50
-
-                if txt_position[1] == 'center':
                     clip_y = (video_height - img_height) // 2
+                elif subtitle_position == '하단-중앙':
+                    clip_x = (video_width - img_width) // 2
+                    clip_y = video_height - img_height - 50
+                elif subtitle_position == '상단-중앙':
+                    clip_x = (video_width - img_width) // 2
+                    clip_y = 50
                 else:
+                    # 기타 위치는 txt_position 사용
+                    clip_x = txt_position[0] if isinstance(txt_position[0], int) else 50
                     clip_y = txt_position[1] if isinstance(txt_position[1], int) else video_height - img_height - 50
+
+                # 오프셋 적용
+                offset_x_px = int(video_width * subtitle_offset_x / 100)
+                offset_y_px = int(video_height * subtitle_offset_y / 100)
+                clip_x += offset_x_px
+                clip_y += offset_y_px
 
                 txt_clip = txt_clip.set_position((clip_x, clip_y))
                 txt_clip = txt_clip.set_start(start_time).set_end(end_time)
@@ -809,7 +836,7 @@ def load_subtitle_text(file):
 
 def generate_preview(subtitle_text, background_file, resolution, font_size, subtitle_position,
                      subtitle_offset_x, subtitle_offset_y,
-                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity):
+                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity):
     """자막이 포함된 미리보기 이미지 생성"""
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -846,6 +873,20 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
             shape_opacity = float(shape_opacity) if shape_opacity is not None else 0.5
         except (ValueError, TypeError):
             shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity = 0, 0, 100, 100, 0.5
+
+        # 도형 색상 처리 (hex to RGB)
+        def hex_to_rgb(hex_color):
+            if not hex_color:
+                return (0, 0, 0)
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) == 3:
+                hex_color = ''.join([c*2 for c in hex_color])
+            try:
+                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            except (ValueError, IndexError):
+                return (0, 0, 0)
+
+        shape_rgb = hex_to_rgb(shape_color) if shape_color else (0, 0, 0)
 
         resolution = resolution if resolution else "1920x1080"
 
@@ -965,7 +1006,7 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
             overlay = Image.new('RGBA', bg_img.size, (0, 0, 0, 0))
             overlay_draw = ImageDraw.Draw(overlay)
             alpha = int(255 * shape_opacity)
-            overlay_draw.rectangle([px_x1, px_y1, px_x2, px_y2], fill=(0, 0, 0, alpha))
+            overlay_draw.rectangle([px_x1, px_y1, px_x2, px_y2], fill=(shape_rgb[0], shape_rgb[1], shape_rgb[2], alpha))
             bg_img = Image.alpha_composite(bg_img.convert('RGBA'), overlay)
 
         # 텍스트 그리기 (검정 외곽선 + 흰색 본문)
@@ -1049,11 +1090,12 @@ def create_ui():
             position_select = gr.Dropdown(choices=subtitle_positions, value="중앙", label="자막위치", visible=False, scale=2)
             subtitle_offset_x = gr.Number(value=0, label="X오프셋(%)", step=1, visible=False, scale=1)
             subtitle_offset_y = gr.Number(value=0, label="Y오프셋(%)", step=1, visible=False, scale=1)
-            use_shape = gr.Checkbox(label="도형삽입", value=False, visible=False, scale=1, min_width=80)
-            shape_x1 = gr.Number(value=0, label="X1(%)", step=1, visible=False, scale=1)
-            shape_y1 = gr.Number(value=40, label="Y1(%)", step=1, visible=False, scale=1)
-            shape_x2 = gr.Number(value=100, label="X2(%)", step=1, visible=False, scale=1)
-            shape_y2 = gr.Number(value=60, label="Y2(%)", step=1, visible=False, scale=1)
+            use_shape = gr.Checkbox(label="도형삽입", value=True, visible=False, scale=1, min_width=80)
+            shape_x1 = gr.Number(value=-5, label="X1(%)", step=1, visible=False, scale=1)
+            shape_y1 = gr.Number(value=45, label="Y1(%)", step=1, visible=False, scale=1)
+            shape_x2 = gr.Number(value=105, label="X2(%)", step=1, visible=False, scale=1)
+            shape_y2 = gr.Number(value=57, label="Y2(%)", step=1, visible=False, scale=1)
+            shape_color = gr.ColorPicker(value="#000000", label="도형색상", visible=False, scale=1)
             shape_opacity = gr.Number(value=0.5, label="도형투명도", step=0.1, visible=False, scale=1)
             status_output = gr.Textbox(label="상태", interactive=False, scale=2)
             generate_btn = gr.Button("생성하기", variant="primary", scale=1)
@@ -1075,14 +1117,14 @@ def create_ui():
         # 배경 파일 첨부 시 영상 설정 표시/숨김
         def toggle_video_settings(file):
             visible = file is not None
-            return [gr.update(visible=visible)] * 12  # 11개 영상설정 + 1개 영상출력
+            return [gr.update(visible=visible)] * 13  # 12개 영상설정 + 1개 영상출력
 
         background_file.change(
             fn=toggle_video_settings,
             inputs=[background_file],
             outputs=[resolution_select, font_size_slider, position_select,
                      subtitle_offset_x, subtitle_offset_y,
-                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity, video_output]
+                     use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity, video_output]
         )
 
         # 미리보기 입력 컴포넌트 리스트
@@ -1090,7 +1132,7 @@ def create_ui():
             subtitle_text, background_file, resolution_select,
             font_size_slider, position_select,
             subtitle_offset_x, subtitle_offset_y,
-            use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity
+            use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity
         ]
 
         # 실시간 미리보기: 설정 변경 시 자동 업데이트
@@ -1101,7 +1143,7 @@ def create_ui():
                 outputs=[preview_image]
             )
 
-        for num_input in [font_size_slider, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity, subtitle_offset_x, subtitle_offset_y]:
+        for num_input in [font_size_slider, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity, subtitle_offset_x, subtitle_offset_y]:
             num_input.change(
                 fn=generate_preview,
                 inputs=preview_inputs,
@@ -1136,7 +1178,7 @@ def create_ui():
         # 생성 버튼 클릭
         def generate_content(tts_txt, sub_txt, voice, lang, speed, step,
                              bg_file, res, font, pos, offset_x, offset_y,
-                             use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_opacity, script_file):
+                             use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_color, shp_opacity, script_file):
             lang_code = get_lang_code(lang)
 
             # 출력 파일명 결정 (대본 파일명 기반)
@@ -1150,7 +1192,7 @@ def create_ui():
                 video_path, status = create_video(
                     tts_txt, sub_txt, voice, lang_code, speed, step,
                     bg_file.name, res, font, pos, offset_x, offset_y,
-                    use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_opacity,
+                    use_shp, shp_x1, shp_y1, shp_x2, shp_y2, shp_color, shp_opacity,
                     output_name=base_name
                 )
                 # 다운로드 파일도 함께 반환
@@ -1170,7 +1212,7 @@ def create_ui():
                 tts_text, subtitle_text, voice_select, lang_select,
                 speed_slider, step_slider, background_file, resolution_select,
                 font_size_slider, position_select, subtitle_offset_x, subtitle_offset_y,
-                use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_opacity, tts_file
+                use_shape, shape_x1, shape_y1, shape_x2, shape_y2, shape_color, shape_opacity, tts_file
             ],
             outputs=[audio_output, video_output, status_output, download_file]
         )
