@@ -44,7 +44,7 @@ whisper_model = None
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'assets')
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'outputs')
 TEMP_DIR = os.path.join(os.path.dirname(__file__), 'temp')
-FONTS_DIR = os.path.join(ASSETS_DIR, 'fonts')
+FONTS_DIR = os.path.join(os.path.dirname(__file__), 'fonts')  # web_app/fonts/ 사용
 
 # 출력 폴더 생성
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -54,7 +54,7 @@ os.makedirs(FONTS_DIR, exist_ok=True)
 
 def ensure_korean_font():
     """한글 폰트가 없으면 설치 - TTF 우선"""
-    font_path = os.path.join(FONTS_DIR, 'NotoSansKR-Bold.ttf')
+    font_path = os.path.join(FONTS_DIR, 'NotoSansKR-SemiBold.ttf')
 
     # 이미 폰트가 있으면 스킵
     if os.path.exists(font_path) and os.path.getsize(font_path) > 100000:
@@ -647,7 +647,7 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
 
         # 폰트 찾기 - TTF 우선
         font_candidates = [
-            os.path.join(FONTS_DIR, 'NotoSansKR-Bold.ttf'),
+            os.path.join(FONTS_DIR, 'NotoSansKR-SemiBold.ttf'),
             '/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf',
             '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
             '/usr/share/fonts/truetype/noto/NotoSansKR-Bold.ttf',
@@ -880,7 +880,7 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
             # 폰트 찾기
             font_size = 120
             font_candidates = [
-                os.path.join(FONTS_DIR, 'NotoSansKR-Bold.ttf'),
+                os.path.join(FONTS_DIR, 'NotoSansKR-SemiBold.ttf'),
                 '/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf',
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
                 'C:/Windows/Fonts/NotoSansKR-Bold.ttf',
@@ -1076,7 +1076,7 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
         # 폰트 찾기 - TTF 우선, TTC는 인덱스 필요
         font_candidates = [
             # TTF 파일 우선 (PIL에서 직접 로드 가능)
-            os.path.join(FONTS_DIR, 'NotoSansKR-Bold.ttf'),
+            os.path.join(FONTS_DIR, 'NotoSansKR-SemiBold.ttf'),
             '/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf',
             '/usr/share/fonts/truetype/noto/NotoSansKR-Bold.ttf',
             'C:/Windows/Fonts/NotoSansKR-Bold.ttf',
