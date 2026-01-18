@@ -861,8 +861,8 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
                 fps=30,
                 codec=video_codec,
                 audio_codec='aac',
-                verbose=False,
-                logger=None
+                verbose=True,
+                logger='bar'
             )
         except Exception as enc_err:
             # NVENC 실패 시 CPU 폴백
@@ -873,8 +873,8 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
                     fps=30,
                     codec='libx264',
                     audio_codec='aac',
-                    verbose=False,
-                    logger=None
+                    verbose=True,
+                    logger='bar'
                 )
 
         # 리소스 정리
@@ -1068,8 +1068,8 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
                 fps=1 if show_clock else 1,  # 시계는 1fps로 충분
                 codec=video_codec,
                 audio=False,
-                verbose=False,
-                logger=None
+                verbose=True,
+                logger='bar'
             )
         except Exception as enc_err:
             # NVENC 실패 시 CPU 폴백
@@ -1080,8 +1080,8 @@ def create_solid_color_video(duration_hours, duration_minutes, duration_seconds,
                     fps=1 if show_clock else 1,
                     codec='libx264',
                     audio=False,
-                    verbose=False,
-                    logger=None
+                    verbose=True,
+                    logger='bar'
                 )
 
         final_clip.close()
