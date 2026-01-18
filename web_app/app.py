@@ -407,31 +407,31 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
     except (ValueError, TypeError):
         font_size = 70
 
-    # 도형 좌표 처리 (% 단위, 0 ~ 100 범위)
+    # 도형 좌표 처리 (% 단위, -10 ~ 110 범위 허용 - 화면 밖까지 확장 가능)
     try:
         shape_x1 = float(shape_x1) if shape_x1 is not None else 0
-        if shape_x1 < 0 or shape_x1 > 100:
+        if shape_x1 < -10 or shape_x1 > 110:
             shape_x1 = 0
     except (ValueError, TypeError):
         shape_x1 = 0
 
     try:
         shape_y1 = float(shape_y1) if shape_y1 is not None else 0
-        if shape_y1 < 0 or shape_y1 > 100:
+        if shape_y1 < -10 or shape_y1 > 110:
             shape_y1 = 0
     except (ValueError, TypeError):
         shape_y1 = 0
 
     try:
         shape_x2 = float(shape_x2) if shape_x2 is not None else 100
-        if shape_x2 < 0 or shape_x2 > 100:
+        if shape_x2 < -10 or shape_x2 > 110:
             shape_x2 = 100
     except (ValueError, TypeError):
         shape_x2 = 100
 
     try:
         shape_y2 = float(shape_y2) if shape_y2 is not None else 100
-        if shape_y2 < 0 or shape_y2 > 100:
+        if shape_y2 < -10 or shape_y2 > 110:
             shape_y2 = 100
     except (ValueError, TypeError):
         shape_y2 = 100
@@ -452,11 +452,15 @@ def create_video(tts_text, subtitle_text, voice_label, language, speed, total_st
         if len(hex_color) == 3:
             hex_color = ''.join([c*2 for c in hex_color])
         try:
-            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            return (r, g, b)
         except (ValueError, IndexError):
             return (0, 0, 0)
 
     shape_rgb = hex_to_rgb(shape_color) if shape_color else (0, 0, 0)
+    print(f"도형 색상 파싱: {shape_color} -> RGB{shape_rgb}")
 
     # X/Y 오프셋 처리 (% 단위, -50 ~ 50 범위)
     try:
@@ -1036,11 +1040,15 @@ def generate_preview(subtitle_text, background_file, resolution, font_size, subt
             if len(hex_color) == 3:
                 hex_color = ''.join([c*2 for c in hex_color])
             try:
-                return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                return (r, g, b)
             except (ValueError, IndexError):
                 return (0, 0, 0)
 
         shape_rgb = hex_to_rgb(shape_color) if shape_color else (0, 0, 0)
+        print(f"미리보기 도형 색상: {shape_color} -> RGB{shape_rgb}")
 
         resolution = resolution if resolution else "1920x1080"
 
